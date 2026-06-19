@@ -20,15 +20,54 @@ $ErrorActionPreference = "Stop"
 $ToolHome = Join-Path $env:LOCALAPPDATA "code-graph-vault"
 $RepoUrl = "https://github.com/SolarljodDev/code-graph-vault.git"
 
-function Assert-Command($name, $hint) {
-    if (-not (Get-Command $name -ErrorAction SilentlyContinue)) {
-        throw "'$name' not found in PATH. $hint"
+function Search-CommonDirs($exeName) {
+    $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}, "$env:LOCALAPPDATA\Programs") |
+        Where-Object { $_ -and (Test-Path $_) }
+    foreach ($root in $roots) {
+        $found = Get-ChildItem -Path $root -Filter $exeName -Recurse -Depth 3 -File -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+        if ($found) { return $found.FullName }
+    }
+    return $null
+}
+
+function Find-Tool($name, $exeName, $extraCandidates, $hint) {
+    $cmd = Get-Command $name -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+
+    foreach ($candidate in $extraCandidates) {
+        if ($candidate -and (Test-Path $candidate)) { return $candidate }
+    }
+
+    $found = Search-CommonDirs $exeName
+    if ($found) { return $found }
+
+    throw "'$name' not found anywhere on this machine. $hint"
+}
+
+function Use-ToolDir($exePath) {
+    $dir = Split-Path $exePath -Parent
+    if ($env:PATH -notlike "*$dir*") {
+        $env:PATH = "$dir;$env:PATH"
     }
 }
 
 function Ensure-Tool {
-    Assert-Command "git" "Install Git: https://git-scm.com/downloads"
-    Assert-Command "node" "Install Node.js: https://nodejs.org"
+    $gitPath = Find-Tool "git" "git.exe" @(
+        "$env:ProgramFiles\Git\cmd\git.exe",
+        "${env:ProgramFiles(x86)}\Git\cmd\git.exe",
+        "$env:LOCALAPPDATA\Programs\Git\cmd\git.exe"
+    ) "Install Git: https://git-scm.com/downloads"
+    Use-ToolDir $gitPath
+
+    $nodePath = Find-Tool "node" "node.exe" @(
+        "$env:ProgramFiles\nodejs\node.exe",
+        "${env:ProgramFiles(x86)}\nodejs\node.exe",
+        "$env:LOCALAPPDATA\Programs\nodejs\node.exe",
+        "$env:APPDATA\npm\node.exe",
+        "$(if ($env:NVM_SYMLINK) { Join-Path $env:NVM_SYMLINK 'node.exe' })"
+    ) "Install Node.js: https://nodejs.org"
+    Use-ToolDir $nodePath
 
     if (-not (Test-Path $ToolHome)) {
         Write-Host "Cloning code-graph-vault into $ToolHome ..."
